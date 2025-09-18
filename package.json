@@ -1,0 +1,14 @@
+{
+  "name": "yt-finder",
+  "version": "1.0.0",
+  "description": "Search a channel, list playlists, and find episodes inside a playlist.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.0",
+    "express": "^4.19.2"
+  }
+}

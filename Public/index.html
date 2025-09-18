@@ -1,0 +1,193 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>YouTube Playlist Finder</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; }
+      .row { display: flex; gap: .5rem; margin-bottom: 1rem; }
+      input { flex: 1; padding: .6rem; font-size: 1rem; }
+      button { padding: .6rem .9rem; cursor: pointer; }
+      ul { list-style: none; padding: 0; }
+      li { margin: .5rem 0; }
+      .pill { font-size: 12px; padding: 2px 8px; border: 1px solid #ccc; border-radius: 999px; background: #f7f7f7; }
+      .muted { color: #666; font-size: 12px; }
+      img.thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; vertical-align: middle; margin: 0 .5rem; }
+      .section { margin-top: 2rem; }
+    </style>
+  </head>
+  <body>
+    <h1>Playlist Finder</h1>
+
+    <div class="section">
+      <h2>1) Find channel</h2>
+      <div class="row">
+        <input id="channelQuery" placeholder="e.g. Steven Bartlett or @StevenBartlett" />
+        <button id="btnSearchChannel">Search</button>
+      </div>
+      <ul id="channelResults"></ul>
+    </div>
+
+    <div class="section">
+      <h2>2) Pick a playlist</h2>
+      <ul id="playlistResults"></ul>
+    </div>
+
+    <div class="section">
+      <h2>3) Search inside selected playlist</h2>
+      <div class="row">
+        <input id="guestQuery" placeholder="e.g. 'Goggins', 'Mo Gawdat'" />
+        <button id="btnSearchPlaylist">Find episode</button>
+      </div>
+      <ul id="episodeResults"></ul>
+    </div>
+
+    <script>
+      let selectedChannelId = null;
+      let selectedPlaylistId = null;
+
+      const $ = id => document.getElementById(id);
+
+      // --- 1) Search channels ---
+      async function searchChannels() {
+        const input = $("channelQuery").value.trim();
+        if (!input) return;
+
+        const qs = input.startsWith("@")
+          ? `handle=${encodeURIComponent(input)}`
+          : `q=${encodeURIComponent(input)}`;
+
+        const r = await fetch(`/api/channels?${qs}`).then(res => res.json());
+
+        $("channelResults").innerHTML = "";
+        $("playlistResults").innerHTML = "";
+        $("episodeResults").innerHTML = "";
+        selectedChannelId = null;
+        selectedPlaylistId = null;
+
+        (r.items || []).forEach(ch => {
+          const li = document.createElement("li");
+          li.innerHTML = `
+            <button class="pill">Select</button>
+            <img class="thumb" src="${ch.thumbnails?.default?.url || ""}" alt="" />
+            <strong>${ch.title}</strong>
+            <div class="muted">${(ch.description || "").slice(0, 120)}...</div>
+          `;
+          $("channelResults").appendChild(li);
+
+          li.querySelector("button").addEventListener("click", () => {
+            console.log("Selected channel:", ch.channelId);
+            selectedChannelId = ch.channelId;
+
+            // Collapse to only the chosen channel
+            $("channelResults").innerHTML = `
+              <li>
+                <img class="thumb" src="${ch.thumbnails?.default?.url || ""}" alt="" />
+                <strong>${ch.title}</strong>
+              </li>
+            `;
+
+            // Load that channel's playlists
+            loadPlaylists(selectedChannelId);
+          });
+        });
+
+        if (!(r.items || []).length) {
+          $("channelResults").innerHTML = `<li class="muted">No channels found.</li>`;
+        }
+      }
+
+      // --- 2) Load playlists for a channel ---
+      async function loadPlaylists(channelId) {
+        const r = await fetch(`/api/playlists?channelId=${encodeURIComponent(channelId)}`)
+          .then(res => res.json());
+
+        $("playlistResults").innerHTML = "";
+        $("episodeResults").innerHTML = "";
+        selectedPlaylistId = null;
+
+        // Filter input
+        const filterRow = document.createElement("div");
+        filterRow.className = "row";
+        filterRow.innerHTML = `<input id="plFilter" placeholder="Filter playlists (e.g. diary)"/>`;
+        $("playlistResults").appendChild(filterRow);
+
+        const ul = document.createElement("ul");
+        $("playlistResults").appendChild(ul);
+
+        function render(list) {
+          ul.innerHTML = "";
+          list.forEach(pl => {
+            const item = document.createElement("li");
+            item.innerHTML = `
+              <button class="pill">Select</button>
+              <img class="thumb" src="${pl.thumbnails?.default?.url || ""}" alt="" />
+              <strong>${pl.title}</strong> <span class="muted">(${pl.itemCount} videos)</span>
+              <div class="muted">${(pl.description || "").slice(0, 120)}...</div>
+            `;
+            ul.appendChild(item);
+
+            item.querySelector("button").addEventListener("click", () => {
+              console.log("Selected playlist:", pl.playlistId);
+              selectedPlaylistId = pl.playlistId;
+
+              // Collapse to only the chosen playlist
+              $("playlistResults").innerHTML = `
+                <li>
+                  <img class="thumb" src="${pl.thumbnails?.default?.url || ""}" alt="" />
+                  <strong>${pl.title}</strong> <span class="muted">(${pl.itemCount} videos)</span>
+                </li>
+              `;
+            });
+          });
+        }
+
+        render(r.items || []);
+
+        const filterInput = $("plFilter");
+        if (filterInput) {
+          filterInput.addEventListener("input", (e) => {
+            const q = e.target.value.toLowerCase();
+            const filtered = (r.items || []).filter(pl =>
+              (pl.title || "").toLowerCase().includes(q)
+            );
+            render(filtered);
+          });
+        }
+
+        if (!(r.items || []).length) {
+          $("playlistResults").innerHTML = `<li class="muted">No playlists found.</li>`;
+        }
+      }
+
+      // --- 3) Search inside the selected playlist ---
+      async function searchPlaylist() {
+        const q = $("guestQuery").value.trim();
+        if (!selectedPlaylistId) {
+          $("episodeResults").innerHTML = `<li class="muted">Pick a playlist first.</li>`;
+          return;
+        }
+        if (!q) return;
+
+        const r = await fetch(
+          `/api/playlist-search?playlistId=${encodeURIComponent(selectedPlaylistId)}&q=${encodeURIComponent(q)}`
+        ).then(res => res.json());
+
+        $("episodeResults").innerHTML = "";
+        (r.results || []).forEach(ep => {
+          const li = document.createElement("li");
+          li.innerHTML = `<a href="${ep.url}" target="_blank" rel="noopener">${ep.title}</a>`;
+          $("episodeResults").appendChild(li);
+        });
+
+        if (!r.count) {
+          $("episodeResults").innerHTML = `<li class="muted">No matches. Try a shorter name or alt spelling.</li>`;
+        }
+      }
+
+      // Wire up buttons
+      $("btnSearchChannel").addEventListener("click", searchChannels);
+      $("btnSearchPlaylist").addEventListener("click", searchPlaylist);
+    </script>
+  </body>
+</html>
